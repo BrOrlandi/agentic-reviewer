@@ -489,10 +489,10 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
             st["queue"].append({"url": url, "owner": owner, "repo": repo, "number": number, "mode": kind,
                                 "channel": channel, "ts": ts})
             save_state(st)
-        log(f"queued {url}: {CFG.max_sessions} review sessions already open")
-        inbox(f"queued {url}", f"{CFG.max_sessions} review sessions are open; it starts when one closes. "
-              "`/agentic-reviewer:status` lists them.")
-        return True
+            log(f"queued {url}: {CFG.max_sessions} review sessions already open")
+            inbox(f"queued {url}", f"{CFG.max_sessions} review sessions are open; it starts when one closes. "
+                  "`/agentic-reviewer:status` lists them.")
+            return True
     open_review(url, owner, repo, number, kind, channel, ts)
     return True
 

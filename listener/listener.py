@@ -48,7 +48,13 @@ LOG = HOME / "logs" / "listener.log"
 PLUGIN = Path(__file__).resolve().parent.parent
 SLACK_STATUS = PLUGIN / "skills" / "review" / "scripts" / "slack-status.sh"
 
-PR_URL = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)")
+PR_URL = re.compile(r"https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)")
+
+
+def canonical(m: re.Match) -> str:
+    return f"https://github.com/{m[1]}/{m[2]}/pull/{m[3]}"
+
+
 PERMALINK = re.compile(r"/archives/([A-Z0-9]+)/p(\d{10})(\d{6})")
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
 CATCH_UP_EVERY = 600
@@ -521,11 +527,11 @@ def handle_messages(msgs: list[dict], watched: set[str]) -> None:
         if not msg["ts"] or msg["ts"] in load_state()["seen"] or not handed_over(msg, watched):
             continue
         text, channel, ts = msg["text"], msg["channel"], msg["ts"]
-        urls = sorted({(m[0], m[1], m[2], m[3]) for m in PR_URL.finditer(text)})
+        urls = sorted({(canonical(m), m[1], m[2], m[3]) for m in PR_URL.finditer(text)})
         if not urls and msg.get("thread_ts") and f"<@{ME['slack']}>" in text:
             # Thread ask: "@you can you review?" under a message that has the link.
             parent = fetch_message(channel, msg["thread_ts"])
-            urls = sorted({(m[0], m[1], m[2], m[3]) for m in PR_URL.finditer(parent.get("text") or "")})
+            urls = sorted({(canonical(m), m[1], m[2], m[3]) for m in PR_URL.finditer(parent.get("text") or "")})
             text = f"{parent.get('text', '')}\n[reply in thread]: {msg['text']}"
             ts = msg["thread_ts"] if urls else ts
         if not urls:
@@ -543,7 +549,7 @@ def handle_messages(msgs: list[dict], watched: set[str]) -> None:
 def open_message(channel: str, ts: str, origin: str) -> None:
     """Explicit request (a trigger reaction or the open command): no trigger filter, triage only picks the mode."""
     m = fetch_message(channel, ts)
-    urls = sorted({(g[0], g[1], g[2], g[3]) for g in PR_URL.finditer(m.get("text") or "")})
+    urls = sorted({(canonical(g), g[1], g[2], g[3]) for g in PR_URL.finditer(m.get("text") or "")})
     if not urls:
         log(f"{origin}: no PR link in {channel}/{ts}")
     for u in urls:
@@ -706,7 +712,7 @@ def main() -> int:
         for link in a.links:
             m = PERMALINK.search(link)
             msg = fetch_message(m[1], f"{m[2]}.{m[3]}") if m else {}
-            for u in sorted({(g[0], g[1], g[2], g[3]) for g in PR_URL.finditer(msg.get("text") or "")}):
+            for u in sorted({(canonical(g), g[1], g[2], g[3]) for g in PR_URL.finditer(msg.get("text") or "")}):
                 print(u[0], *triage(msg.get("text") or "", u[1], u[2], pr_info(*u[1:]), explicit=False))
         return 0
     if a.command == "open":

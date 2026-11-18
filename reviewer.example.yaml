@@ -17,6 +17,9 @@ review:
 triage:
   enabled: true
   model: claude-haiku-5-5
+learning:
+  max_chars: 3000                 # per repository learnings file; over it, rules must be promoted or merged first
+  promote_after: 3                # times a rule comes back before it is proposed for the repo's REVIEW.md/CLAUDE.md
 orca:
   worktree: ~/orca/workspaces/reviews/main   # REQUIRED. Where the review terminals open
 inbox: ~/.agentic-reviewer/inbox  # things the listener could not do on its own

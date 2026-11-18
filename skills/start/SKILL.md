@@ -18,11 +18,23 @@ argument-hint: "[path to reviewer.yaml]"
    ```bash
    uv run --quiet --script "${CLAUDE_PLUGIN_ROOT}/listener/listener.py" run --config "<absolute path to reviewer.yaml>"
    ```
-4. Tell the user in a few lines: what it watches (the first log line says it), that each PR opens an Orca terminal
+4. **Launch the learnings wait** in the background too (`run_in_background: true`):
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/skills/learnings/scripts/wait-pending.sh" "<reviewer folder>"
+   ```
+   It exits with `PENDING <n>` as soon as a review session proposes a learning (or right away if some are
+   waiting).
+5. Tell the user in a few lines: what it watches (the first log line says it), that each PR opens an Orca terminal
    titled `PR <repo>#<n>` which closes itself when the PR is merged or closed, that the log is
    `~/.agentic-reviewer/logs/listener.log`, and that **closing this session stops the listener**.
 
-## When the background task ends
+## When the learnings wait ends
+
+Run the `/agentic-reviewer:learnings` flow here: ask the user about each proposal. This does not pause anything —
+the listener and the review sessions keep running in their own processes while the question is open. When done,
+launch the wait again.
+
+## When the listener ends
 
 Read its last lines (`tail -5` of the task output, or the log):
 

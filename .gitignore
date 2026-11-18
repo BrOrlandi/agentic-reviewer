@@ -1,5 +1,7 @@
 # Your own reviewer setup: personal, never committed
 reviewer.yaml
 CRITERIA.md
+orgs/
+pending-learnings.jsonl
 .DS_Store
 __pycache__/

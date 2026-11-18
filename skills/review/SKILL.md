@@ -2,7 +2,7 @@
 name: review
 description: Review someone else's GitHub PR against the repository's own rules (REVIEW.md, CLAUDE.md, AGENTS.md and every other AI instruction file, plus the docs they point to) and the reviewer's CRITERIA.md, post one review with inline comments, then keep following the PR on its own — when the author pushes fixes, replies or reacts, run another round that checks each finding, answers the replies and reviews the new code, and approve once every finding is fixed or validly answered and CI is green. After approving it keeps watching and re-reviews new commits before approving again. `mode=deploy` runs a release checklist instead of a line-by-line review. Runs only when invoked explicitly (the agentic-reviewer listener invokes it), because it posts reviews and approves on the user's behalf.
 disable-model-invocation: true
-argument-hint: "<PR URL or number> [slack=<channel>:<ts>] [mode=review|deploy] [criteria=<path>] [close-terminal] [max-rounds=N]"
+argument-hint: "<PR URL or number> [slack=<channel>:<ts>] [mode=review|deploy] [reviewer=<folder>] [clone=<path>] [close-terminal] [max-rounds=N]"
 ---
 
 # Review loop
@@ -23,7 +23,8 @@ merging, pushing, requesting changes, or editing the author's code.
   (see **Slack status reactions**). A Slack message link is also accepted
   (`.../archives/<channel>/p<16 digits>` → ts `<first 10>.<last 6>`).
 - `mode=review` (default) or `mode=deploy` — see **Deploy mode**. Only these two values exist; ignore anything else.
-- `criteria=<path>` — the reviewer's `CRITERIA.md` (Step 1, item 2).
+- `reviewer=<folder>` — the reviewer folder (where `reviewer.yaml` lives): criteria and learnings come from it
+  (Step 1 and **Learning from feedback**). Without it, use the current folder when it has a `reviewer.yaml`.
 - `clone=<path>` — a local clone of the PR's repository, used for the worktree in Step 2.
 - `close-terminal` — this session runs in an Orca terminal opened only for this PR; when the PR is merged or
   closed, Step 6 ends by closing it.
@@ -81,9 +82,14 @@ Findings come from the repository's rules first and taste last. Read, in this or
    ```
    **Follow their pointers**: when they say "before changing X read Y" (`docs/…`, `.ai/context/*.mdc`), read Y
    for every X the diff changes.
-2. **The reviewer's `CRITERIA.md`** (`criteria=` argument): the user's own review criteria. They add to the
-   repository's rules; where they conflict, the repository wins.
-3. **The user's global instructions** already in context (`~/.claude/CLAUDE.md`).
+2. **Learnings for this repository**: `<reviewer>/orgs/<owner>/<repo>.md` — rules this reviewer learned from
+   the feedback of this repo's authors, approved by the user. Treat them like the repo's own rules.
+3. **Criteria for this organization**: `<reviewer>/orgs/<owner>/CRITERIA.md` — the user's criteria for that GitHub org
+   (or for their personal account, when `<owner>` is their login).
+4. **The reviewer's general criteria**: `<reviewer>/CRITERIA.md`.
+5. **The user's global instructions** already in context (`~/.claude/CLAUDE.md`).
+
+Earlier items win on conflict: the repository's own files always come first.
 
 Write down the rules that apply to this diff, one line each with its source (`file:line`). Every finding that rests
 on a rule cites it. A pattern the repository endorses is never a finding. A documented rule that looks stale is
@@ -166,6 +172,36 @@ raised as a ❓ question about the rule, not as a defect.
    (`…/pulls/<N>/reviews/<review_id>/comments`), `thread_id` from the `reviewThreads` GraphQL query
    (`comments(first:1){nodes{databaseId}}` matches it to the comment), `posted_at` is the review's `submitted_at`.
 
+## Learning from feedback
+
+The reviewer gets better at each repository by learning from what its people answer. Whenever, during the loop:
+
+- the author or another person says a finding is wrong, intended, or not how this repo does things — in a PR
+  thread, a PR comment, or a reply in the Slack thread of the `slack=` message
+  (`slackcli conversations read <channel> --thread-ts <ts> --json`), and the reason **holds** against the code; or
+- a finding is accepted as "their call" after the author insisted (Step 4),
+
+distill it into **one short, general rule for this repository** (≤ 200 characters, no names, no secrets), e.g.
+"Feature flags are read through `useFlag`, never from env directly — do not flag direct env reads in `web/`".
+Then compare it with `<reviewer>/orgs/<owner>/<repo>.md`:
+
+- **Same rule already there** → reinforce it yourself: bump its counter (`[x2]` → `[x3]`) and add the PR to its
+  sources. When the counter reaches `learning.promote_after` in `reviewer.yaml` (default 3), or the file is over
+  `learning.max_chars` (default 3000), also propose a promotion (below).
+- **New rule** → do not write it to the learnings file. Append a proposal, one JSON line, to
+  `<reviewer>/pending-learnings.jsonl`:
+  ```json
+  {"id": "<owner>-<repo>-<N>-<n>", "kind": "new", "repo": "<owner>/<repo>", "rule": "…",
+   "evidence": ["<comment or Slack message URL>"], "pr": "<PR URL>", "created_at": "<ISO time>"}
+  ```
+  The user approves it from their reviewer session (`/agentic-reviewer:learnings`); until then it does not count.
+- **Promotion** → append `{"kind": "promote", "repo": …, "rule": …, "count": N, …}`: the rule keeps coming back,
+  so it belongs in the repository's own `REVIEW.md` / `CLAUDE.md` / `AGENTS.md`, where every reviewer and agent
+  reads it.
+
+A learning is about the repository, never about a person. Feedback that does not hold (the author is wrong) is not
+a learning. List the proposals you made in the final report.
+
 ## Deploy mode
 
 `mode=deploy` is a request to approve a release PR (e.g. `staging → main`), not a feature to review line by line.
@@ -216,15 +252,17 @@ re-check the threads, but a reaction never resolves a finding.
    - every reply in the threads this loop opened or adopted (`in_reply_to_id` = the finding's `comment_id`), plus
      PR-level comments and reviews by people after `posted_at`;
    - review comments posted since `posted_at` by bots or other people → judge them as in Step 2.4;
+   - replies in the Slack thread of the `slack=` message, if any (feedback for **Learning from feedback**);
    - CI: `gh pr checks <N> --repo <o>/<r>`.
 2. Classify each open finding:
    - **fixed** — the new code removes the problem. Verify it in the code; "Fixed in abc123" is a claim to check.
    - **answered, valid** — the author explains why it is not a problem or is out of scope, and the reason holds
      against the code and the rules (a follow-up ticket for a non-critical item counts). Judge the reason, not the
-     tone.
+     tone. When the reason is about how this repo works (not a one-off), it is a learning (**Learning from
+     feedback**).
    - **answered, not valid** — reply in the thread once, briefly, with the concrete scenario or the rule, and keep
      it open. If the author insists a second time with no new argument and the finding is not 🔴 or 🔒, accept it
-     as their call and record that for the final report.
+     as their call, record that for the final report, and treat it as feedback (**Learning from feedback**).
    - **unaddressed** — keep it open; do not re-post it.
    - A 🔴 or 🔒 finding closes only with a fix or an argument that shows it is not a bug — never "will do later".
 3. Review the **new code** (the diff since `reviewed_sha`) with Step 2's method; new findings only for code that
@@ -308,7 +346,8 @@ Report to the user, short:
 - the outcome — approved (link), handed back after N rounds, merged or closed by someone else, or timed out;
 - each finding and what it became;
 - anything to look at personally (a finding accepted after the author insisted, an unrelated CI failure, an
-  ambiguous reply).
+  ambiguous reply);
+- the learnings reinforced and proposed (see **Learning from feedback**).
 
 Clean up: remove the worktree (`git -C <clone> worktree remove --force "$WORK/<repo>-<N>"`) and the payload files.
 Delete the state file when the PR is merged or closed; keep it when the loop stopped without approving, so a later

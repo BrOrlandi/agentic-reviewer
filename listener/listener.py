@@ -90,8 +90,6 @@ class Config:
         self.triage_model = triage.get("model", "claude-haiku-5-5")
         self.worktree = expand(orca.get("worktree"))
         self.inbox = expand(raw.get("inbox")) or HOME / "inbox"
-        criteria = self.folder / "CRITERIA.md"
-        self.criteria = criteria if criteria.exists() else None
         problems = []
         if not self.allowed_orgs:
             problems.append("github.allowed_orgs is empty: nothing would ever be reviewed (fail closed)")
@@ -414,8 +412,7 @@ def launch(url: str, owner: str, repo: str, number: str, mode: str, channel: str
             f"max-rounds={CFG.max_rounds}"]
     if channel and ts:
         args.append(f"slack={channel}:{ts}")
-    if CFG.criteria:
-        args.append(f"criteria={CFG.criteria}")
+    args.append(f"reviewer={CFG.folder}")
     if CFG.clones_dir and (CFG.clones_dir / repo / ".git").exists():
         args.append(f"clone={CFG.clones_dir / repo}")
     cmd = ["claude", "--model", CFG.model, "--effort", CFG.effort]

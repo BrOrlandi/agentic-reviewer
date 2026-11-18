@@ -36,12 +36,16 @@ Ask with the question tool, a few at a time, offering the detected values as def
    (default 4).
 7. **Inbox** — the folder for things that need them (default `~/.agentic-reviewer/inbox`), and whether to also get
    a Slack DM.
-8. **Review criteria** — what they would tell a new reviewer on their team. These go in `CRITERIA.md`; the PR
+8. **Review criteria** — what they would tell a new reviewer on their team, in general (`CRITERIA.md`) and per
+   org (`orgs/<org>/CRITERIA.md`, one per allowed org, plus one for their own GitHub login for personal repos). The PR
    repository's own `REVIEW.md` / `CLAUDE.md` / `AGENTS.md` always come first.
+9. **Self-improvement limits** — `learning.max_chars` (default 3000) and `learning.promote_after` (default 3).
 
 ## 3. Write the files
 
 - `reviewer.yaml` from `${CLAUDE_PLUGIN_ROOT}/reviewer.example.yaml`, with the answers.
 - `CRITERIA.md` from `${CLAUDE_PLUGIN_ROOT}/CRITERIA.example.md`, with their criteria as short bullets.
+- `orgs/<org>/CRITERIA.md` for each org they gave criteria for.
+- an `orgs/<org>/` folder per allowed org (review sessions add `<repo>.md` learnings there; `/agentic-reviewer:learnings` curates them).
 
 Show both and end with: run `/agentic-reviewer:start` here, and keep this session open while it should listen.

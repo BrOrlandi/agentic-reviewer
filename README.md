@@ -8,7 +8,7 @@
 
 You stay the reviewer: reviews and approvals go out under your own GitHub and Slack accounts, and are marked as AI-generated. The agent does the work, while what counts as a good change comes from the repository's rules and the criteria you set.
 
-> Status: private preview. macOS + [Orca](https://orca.build) + [slackcli](https://github.com/shaharia-lab/slackcli) + [Claude Code](https://claude.com/claude-code).
+> Status: private preview. [Orca](https://orca.build) + [slackcli](https://github.com/shaharia-lab/slackcli) + [Claude Code](https://claude.com/claude-code).
 
 ## What it looks like
 
@@ -161,7 +161,6 @@ On the first start nothing old is replayed: Slack is read from that moment on, a
 
 ## Requirements
 
-- macOS
 - [Orca](https://orca.build): each review runs in its own Orca terminal
 - [Claude Code](https://claude.com/claude-code)
 - [slackcli](https://github.com/shaharia-lab/slackcli), logged in with `slackcli auth login-auto`
@@ -209,7 +208,7 @@ uv run --script listener/listener.py triage --config reviewer.yaml <slack messag
 
 ## Limitations
 
-- **macOS and Orca only.** Credentials come from the macOS keychain, and every review runs in an Orca terminal.
+- **Orca only.** Every review runs in an Orca terminal.
 - **Reactions made while the listener is off are not recovered** (Slack search does not find reactions). Remove the 👀 and add it again.
 - **Thread asks are seen live only.** A mention in a thread while the listener is off is not caught up; use `/agentic-reviewer:open` with the parent message.
 - **The Slack connection is unofficial** (see Safety).

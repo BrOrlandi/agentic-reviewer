@@ -4,7 +4,7 @@
 # ///
 """agentic-reviewer listener: hands every PR sent to you on Slack to a Claude Code review session in Orca.
 
-It connects to Slack in real time with your own browser session (the one `slackcli` keeps in the macOS keychain),
+It connects to Slack in real time with your own browser session (the one `slackcli` keeps in its config or the macOS keychain),
 catches up with Slack search after every reconnect and every 10 minutes, filters messages by trigger and org, asks a
 cheap model whether the message is really a review request, and opens one Orca terminal per PR running
 `/agentic-reviewer:review`. It also polls GitHub for review requests addressed to you personally, and closes a
@@ -252,15 +252,24 @@ class SessionExpired(Exception):
 
 
 def slack_credentials() -> tuple[str, str]:
-    """Token and `d` cookie of slackcli's browser login, read from the keychain at connect time only."""
+    """Token and `d` cookie of slackcli's browser login, read at connect time only.
+
+    slackcli keeps them inline in workspaces.json (its default "file" backend, on any OS) or, when the profile was
+    moved there, in the macOS Keychain ("keychain" backend)."""
     try:
         meta = json.loads((Path.home() / ".config/slackcli/workspaces.json").read_text())
         team = CFG.workspace or meta.get("default_workspace")
         team = team if team in meta["workspaces"] else next(
             k for k, v in meta["workspaces"].items() if team in (v.get("workspace_name"), k))
-        kc = lambda kind: run(["/usr/bin/security", "find-generic-password", "-s", "slackcli",
-                               "-a", f"{team}:{kind}", "-w"]).stdout.strip()
-        token, d = kc("xoxc"), kc("xoxd")
+        ws = meta["workspaces"][team]
+        if ws.get("secret_backend", "file") == "keychain":
+            kc = lambda kind: run(["/usr/bin/security", "find-generic-password", "-s", "slackcli",
+                                   "-a", f"{team}:{kind}", "-w"]).stdout.strip()
+            token, d = kc("xoxc"), kc("xoxd")
+        else:
+            token, d = ws["xoxc_token"], ws["xoxd_token"]
+        if not (token and d):
+            raise ValueError("empty credentials")
     except (OSError, ValueError, KeyError, StopIteration, subprocess.CalledProcessError) as exc:
         raise SessionExpired(f"no slackcli browser login found ({type(exc).__name__})") from exc
     return token, "d=" + urllib.parse.quote(urllib.parse.unquote(d))

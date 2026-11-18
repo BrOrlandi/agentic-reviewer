@@ -1,0 +1,12 @@
+{
+  "name": "agentic-reviewer",
+  "owner": { "name": "Bruno Orlandi" },
+  "metadata": { "description": "Agentic code review driven by Slack." },
+  "plugins": [
+    {
+      "name": "agentic-reviewer",
+      "description": "Become an agentic code reviewer: PR links sent to you on Slack open a Claude Code review that follows up with the author and approves when everything is resolved.",
+      "source": "./"
+    }
+  ]
+}

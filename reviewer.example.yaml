@@ -1,0 +1,22 @@
+# Copy to reviewer.yaml (gitignored) in the folder where you start Claude Code, or run /agentic-reviewer:setup.
+slack:
+  workspace:                      # slackcli workspace id or name; empty = slackcli's default
+  watch_channels: []              # channel names or ids where every PR link is a candidate (the triage decides)
+  trigger_reactions: [eyes]       # your reaction on a message with a PR link asks for a review
+  notify_dm: false                # also DM yourself when something lands in the inbox
+github:
+  allowed_orgs: []                # REQUIRED. Only PRs from these orgs open a review session (fail closed)
+  review_requests: true           # review PRs where you are personally requested (not via a team/CODEOWNERS)
+  clones_dir: ~/code              # where your local clones live (<clones_dir>/<repo>), for whole-file reading
+review:
+  model: claude-opus-5-5
+  effort: medium
+  max_rounds: 5
+  max_sessions: 4                 # review sessions open at once; the rest wait in a queue
+  skip_permissions: true          # review sessions run without permission prompts (see Safety in the README)
+triage:
+  enabled: true
+  model: claude-haiku-5-5
+orca:
+  worktree: ~/orca/workspaces/reviews/main   # REQUIRED. Where the review terminals open
+inbox: ~/.agentic-reviewer/inbox  # things the listener could not do on its own

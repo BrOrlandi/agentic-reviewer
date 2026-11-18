@@ -1,0 +1,5 @@
+# Your own reviewer setup: personal, never committed
+reviewer.yaml
+CRITERIA.md
+.DS_Store
+__pycache__/

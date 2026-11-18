@@ -1,0 +1,47 @@
+---
+name: setup
+description: Set up agentic-reviewer once — interview the user, write reviewer.yaml and CRITERIA.md in the current folder, and check slackcli, gh, Orca and uv. Use when the user installs agentic-reviewer, wants to configure or reconfigure it, or runs /agentic-reviewer:setup.
+disable-model-invocation: true
+---
+
+# Set up the reviewer
+
+The folder where this runs becomes the **reviewer folder**: `reviewer.yaml` and `CRITERIA.md` live here, and
+`/agentic-reviewer:start` is run from here. Both files are personal, so remind the user to keep them out of any
+public repository (the plugin's own repo already ignores them).
+
+## 1. Check the tools
+
+| Tool | Check | Fix |
+| --- | --- | --- |
+| slackcli | `slackcli auth whoami` shows a verified **browser** login | `slackcli auth login-auto` |
+| GitHub CLI | `gh auth status` | `gh auth login` |
+| Orca | `orca status` | install and open Orca |
+| uv | `uv --version` | install uv |
+
+Stop at the first one missing and give the fix.
+
+## 2. Interview
+
+Ask with the question tool, a few at a time, offering the detected values as defaults:
+
+1. **Allowed GitHub orgs** (required) — only their PRs open a review session. Suggest the orgs of the user's
+   recent PRs (`gh search prs --author @me --limit 30 --json repository`).
+2. **Watched Slack channels** — channels where every PR link is a candidate even without a mention (the triage
+   filters notifications out). Default none.
+3. **GitHub review requests** — also review PRs where they are personally requested. Default yes.
+4. **Orca worktree** for the review terminals — an existing folder, ideally a checkout used only for reviews.
+5. **Local clones folder** — where clones live as `<folder>/<repo>`, so the review reads whole files.
+6. **Model and effort** for reviews (default `claude-opus-5-5`, `medium`), and the **maximum sessions** open at once
+   (default 4).
+7. **Inbox** — the folder for things that need them (default `~/.agentic-reviewer/inbox`), and whether to also get
+   a Slack DM.
+8. **Review criteria** — what they would tell a new reviewer on their team. These go in `CRITERIA.md`; the PR
+   repository's own `REVIEW.md` / `CLAUDE.md` / `AGENTS.md` always come first.
+
+## 3. Write the files
+
+- `reviewer.yaml` from `${CLAUDE_PLUGIN_ROOT}/reviewer.example.yaml`, with the answers.
+- `CRITERIA.md` from `${CLAUDE_PLUGIN_ROOT}/CRITERIA.example.md`, with their criteria as short bullets.
+
+Show both and end with: run `/agentic-reviewer:start` here, and keep this session open while it should listen.

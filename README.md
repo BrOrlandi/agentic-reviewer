@@ -165,7 +165,7 @@ On the first start nothing old is replayed: Slack is read from that moment on, a
 - [Claude Code](https://claude.com/claude-code)
 - [slackcli](https://github.com/shaharia-lab/slackcli), logged in with `slackcli auth login-auto`
 - [GitHub CLI](https://cli.github.com), logged in as the reviewer
-- [uv](https://docs.astral.sh/uv/)
+- [uv](https://docs.astral.sh/uv/): setup installs it when it is missing
 
 ## Install
 

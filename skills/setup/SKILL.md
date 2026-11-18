@@ -22,9 +22,9 @@ repo and run setup inside it, and that continuing here works too: the configurat
 | slackcli | `slackcli auth whoami` shows a verified **browser** login | `slackcli auth login-auto` |
 | GitHub CLI | `gh auth status` | `gh auth login` |
 | Orca | `orca status` | install and open Orca |
-| uv | `uv --version` | install uv |
+| uv | `uv --version` | install it yourself, after a yes: `curl -LsSf https://astral.sh/uv/install.sh \| sh` (or `brew install uv` when Homebrew is there) |
 
-Stop at the first one missing and give the fix.
+Stop at the first one missing and give the fix. uv is the exception: install it and go on.
 
 ## 2. Interview
 

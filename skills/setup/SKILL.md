@@ -10,6 +10,11 @@ The folder where this runs becomes the **reviewer folder**: `reviewer.yaml` and 
 `/agentic-reviewer:start` is run from here. Both files are personal, so remind the user to keep them out of any
 public repository (the plugin's own repo already ignores them).
 
+Before anything else, tell the user which folder that is. When it is not a clone of the agentic-reviewer
+repository (no `.claude-plugin/marketplace.json` here), say in one line that the recommended setup is to clone the
+repo and run setup inside it, and that continuing here works too: the configuration is saved in this folder, and
+`/agentic-reviewer:start` must be run from it. Then continue, unless the user wants to switch.
+
 ## 1. Check the tools
 
 | Tool | Check | Fix |

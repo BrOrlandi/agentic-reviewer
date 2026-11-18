@@ -170,18 +170,35 @@ On the first start nothing old is replayed: Slack is read from that moment on, a
 
 ## Install
 
-In Claude Code:
+**Option 1 — clone the repository (recommended).** The clone becomes your reviewer folder: your `reviewer.yaml`,
+criteria and learnings live next to the plugin and stay out of git (`.gitignore` already lists them), and the same
+folder is the Orca worktree the review terminals open in.
+
+```bash
+git clone https://github.com/BrOrlandi/agentic-reviewer.git
+cd agentic-reviewer
+claude
+```
+
+Then, in Claude Code:
+
+```bash
+/plugin marketplace add ./
+/plugin install agentic-reviewer@agentic-reviewer
+/agentic-reviewer:setup      # once: interview → reviewer.yaml, CRITERIA.md
+/agentic-reviewer:start      # each time: listen while this session is open
+```
+
+To update: `git pull`, then `/plugin marketplace update agentic-reviewer`.
+
+**Option 2 — install the plugin only.** Setup saves your configuration in the folder where you run it, so pick a
+folder you will keep (for example `~/agentic-reviewer`) and always start from there.
 
 ```bash
 /plugin marketplace add BrOrlandi/agentic-reviewer
 /plugin install agentic-reviewer@agentic-reviewer
-```
-
-Then, in the folder you want as your reviewer folder:
-
-```bash
-/agentic-reviewer:setup      # once: interview → reviewer.yaml, CRITERIA.md
-/agentic-reviewer:start      # each time: listen while this session is open
+/agentic-reviewer:setup
+/agentic-reviewer:start
 ```
 
 To try the triage on a message without opening anything:

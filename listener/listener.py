@@ -44,6 +44,7 @@ import yaml
 
 HOME = Path(os.environ.get("AGENTIC_REVIEWER_HOME", Path.home() / ".agentic-reviewer"))
 STATE = HOME / "state.json"
+EVENTS = HOME / "events.jsonl"  # one line per PR status change; the reviewer session shows them as a panel
 LOG = HOME / "logs" / "listener.log"
 PLUGIN = Path(__file__).resolve().parent.parent
 SLACK_STATUS = PLUGIN / "skills" / "review" / "scripts" / "slack-status.sh"
@@ -133,6 +134,47 @@ def inbox(title: str, detail: str) -> None:
         slackcli("messages", "send", "--recipient-id", ME["slack"], "--message", f"agentic-reviewer: {title}", check=False)
 
 
+# --- panel events -------------------------------------------------------------------------------
+
+FINAL = ("merged", "closed")
+
+
+def slack_link(channel: str, ts: str) -> str:
+    """Permalink of a Slack message, built from slackcli's workspace URL (no API call)."""
+    if not channel or not ts:
+        return ""
+    try:
+        meta = json.loads((Path.home() / ".config/slackcli/workspaces.json").read_text())
+        ws = meta["workspaces"].get(CFG.workspace or meta.get("default_workspace")) \
+            or next(iter(meta["workspaces"].values()))
+        base = ws["workspace_url"].rstrip("/")
+    except (OSError, ValueError, KeyError, StopIteration):
+        return ""
+    return f"{base}/archives/{channel}/p{ts.replace('.', '')}"
+
+
+def event(key: str, status: str, **fields) -> None:
+    """Append one status change to the events file the reviewer session turns into a panel."""
+    owner_repo, number = key.rsplit("#", 1)
+    rec = {"time": datetime.now().astimezone().isoformat(timespec="seconds"), "key": key, "repo": owner_repo,
+           "number": int(number), "url": f"https://github.com/{owner_repo}/pull/{number}", "status": status}
+    rec.update({k: v for k, v in fields.items() if v not in (None, "")})
+    HOME.mkdir(parents=True, exist_ok=True)
+    with EVENTS.open("a") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def track(key: str, status: str, **fields) -> None:
+    """Record a PR on the panel and remember it so its verdict is followed on GitHub."""
+    with _lock:
+        st = load_state()
+        t = st["tracked"].setdefault(key, {})
+        t.update({k: v for k, v in fields.items() if k in ("slack", "title", "origin") and v})
+        t["status"] = status
+        save_state(st)
+    event(key, status, **fields)
+
+
 # --- state --------------------------------------------------------------------------------------
 
 def load_state() -> dict:
@@ -145,6 +187,7 @@ def load_state() -> dict:
     st.setdefault("launched", {})        # "owner/repo#n" -> when a review was opened
     st.setdefault("terminals", {})       # "owner/repo#n" -> Orca terminal handle
     st.setdefault("queue", [])           # reviews waiting for a free session slot
+    st.setdefault("tracked", {})         # "owner/repo#n" -> last status shown on the panel, until merged/closed
     return st
 
 
@@ -471,6 +514,8 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
     reason = skip_reason(pr)
     if reason:
         log(f"skip {url} ({origin}): {reason}")
+        if not origin.startswith("GitHub"):
+            event(key, "skipped", title=pr.get("title"), slack=slack_link(channel, ts), origin=origin, note=reason)
         return True
     kind, why = ("review_request", "triage disabled") if not CFG.triage_enabled else \
         triage(message, owner, repo, pr, explicit)
@@ -481,28 +526,34 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
             inbox(f"triage failed for {url}", f"From {origin}: {why}. To review it: `/agentic-reviewer:review {url}`")
             return True
     log(f"triage {url} ({origin}): {kind} — {why}")
+    panel = {"title": pr.get("title"), "slack": slack_link(channel, ts), "origin": origin}
     if kind not in ("review_request", "deploy_approval"):
+        event(key, "ignored", **panel, note=f"triage: {kind} — {why}")
         return True
     with _lock:
         st = load_state()
-        if len(st["terminals"]) >= CFG.max_sessions:
+        queued = len(st["terminals"]) >= CFG.max_sessions
+        if queued:
             st["queue"].append({"url": url, "owner": owner, "repo": repo, "number": number, "mode": kind,
                                 "channel": channel, "ts": ts})
             save_state(st)
-            log(f"queued {url}: {CFG.max_sessions} review sessions already open")
-            inbox(f"queued {url}", f"{CFG.max_sessions} review sessions are open; it starts when one closes. "
-                  "`/agentic-reviewer:status` lists them.")
-            return True
-    open_review(url, owner, repo, number, kind, channel, ts)
+    if queued:
+        log(f"queued {url}: {CFG.max_sessions} review sessions already open")
+        track(key, "queued", **panel, note=f"{CFG.max_sessions} review sessions already open")
+        inbox(f"queued {url}", f"{CFG.max_sessions} review sessions are open; it starts when one closes. "
+              "`/agentic-reviewer:status` lists them.")
+        return True
+    open_review(url, owner, repo, number, kind, channel, ts, pr.get("title"), origin)
     return True
 
 
-def open_review(url, owner, repo, number, kind, channel, ts) -> None:
+def open_review(url, owner, repo, number, kind, channel, ts, title="", origin="") -> None:
     key = f"{owner}/{repo}#{number}".lower()
     try:
         handle = launch(url, owner, repo, number, kind, channel, ts)
     except Exception as exc:  # noqa: BLE001
         inbox(f"could not open the review of {url}", f"`{exc}`\n\nTo review it: `/agentic-reviewer:review {url}`")
+        event(key, "failed", title=title, slack=slack_link(channel, ts), origin=origin, note=str(exc)[:200])
         return
     slack_status(channel, ts, "reviewing")
     with _lock:
@@ -512,6 +563,8 @@ def open_review(url, owner, repo, number, kind, channel, ts) -> None:
             st["terminals"][key] = handle
         save_state(st)
     log(f"review opened: {url} ({'deploy' if kind == 'deploy_approval' else 'review'})")
+    track(key, "reviewing", title=title, slack=slack_link(channel, ts), origin=origin,
+          note="deploy checklist" if kind == "deploy_approval" else "")
 
 
 # --- triggers -----------------------------------------------------------------------------------
@@ -608,6 +661,50 @@ def reap() -> None:
         save_state(st)
     for q in start:
         open_review(q["url"], q["owner"], q["repo"], q["number"], q["mode"], q["channel"], q["ts"])
+    follow_verdicts()
+
+
+def verdict(owner_repo: str, number: str) -> tuple[str, str, str]:
+    """(status, link, title) of a tracked PR as GitHub shows it: merged/closed, or your latest review on it."""
+    pr = json.loads(gh("api", f"repos/{owner_repo}/pulls/{number}"))
+    head = (pr.get("head") or {}).get("sha")
+    mine = [r for r in json.loads(gh("api", "--paginate", f"repos/{owner_repo}/pulls/{number}/reviews") or "[]")
+            if (r.get("user") or {}).get("login", "").lower() == ME["gh"].lower()]
+    approvals = [r for r in mine if r.get("state") == "APPROVED"]
+    if pr.get("merged_at") or pr.get("state") == "closed":  # keep your approval, if any, as the link
+        return ("merged" if pr.get("merged_at") else "closed",
+                approvals[-1].get("html_url") or "" if approvals else "", pr.get("title") or "")
+    if approvals and approvals[-1].get("commit_id") == head:
+        return "approved", approvals[-1].get("html_url") or "", pr.get("title") or ""
+    # A review with a body is a findings round; thread replies are bodyless COMMENTED reviews.
+    rounds = [r for r in mine if r.get("state") == "COMMENTED" and (r.get("body") or "").strip()]
+    if rounds and (not approvals or rounds[-1]["submitted_at"] > approvals[-1]["submitted_at"]):
+        return "changes", rounds[-1].get("html_url") or "", pr.get("title") or ""
+    return "reviewing", "", pr.get("title") or ""
+
+
+def follow_verdicts() -> None:
+    """Emit a panel event whenever a tracked PR gets approved, gets findings, or is merged or closed."""
+    for key, t in list(load_state()["tracked"].items()):
+        if t.get("status") == "queued":
+            continue
+        owner_repo, number = key.rsplit("#", 1)
+        try:
+            status, link, title = verdict(owner_repo, number)
+        except Exception as exc:  # noqa: BLE001 — GitHub unreachable: try again next time
+            log(f"could not read the verdict of {key}: {exc}")
+            continue
+        if status == t.get("status") and link == t.get("link"):
+            continue
+        with _lock:
+            st = load_state()
+            if status in FINAL:
+                st["tracked"].pop(key, None)
+            else:
+                st["tracked"].setdefault(key, {}).update(status=status, link=link)
+            save_state(st)
+        log(f"panel: {key} {status} {link}".rstrip())
+        event(key, status, title=title, link=link, slack=t.get("slack"), origin=t.get("origin"))
 
 
 def catch_up(watched: set[str]) -> None:
@@ -725,6 +822,12 @@ def main() -> int:
         return 0
     lock = single_instance()  # noqa: F841 — held for the life of the process
     first_run_baseline()
+    with _lock:  # reviews opened before the panel existed (or by an older listener) join it
+        st = load_state()
+        for key, when in st["launched"].items():
+            if time.time() - when < RELAUNCH_AFTER:
+                st["tracked"].setdefault(key, {"status": ""})
+        save_state(st)
     if a.command == "once":
         catch_up(channel_ids(CFG.watch_channels))
         return 0

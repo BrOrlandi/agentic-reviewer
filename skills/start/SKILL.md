@@ -24,9 +24,33 @@ argument-hint: "[path to reviewer.yaml]"
    ```
    It exits with `PENDING <n>` as soon as a review session proposes a learning (or right away if some are
    waiting).
-5. Tell the user in a few lines: what it watches (the first log line says it), that each PR opens an Orca terminal
+5. **Show the panel and launch the panel wait** in the background (`run_in_background: true`):
+   ```bash
+   python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/start/scripts/panel.py"          # once, now: PRs already in flight
+   "${CLAUDE_PLUGIN_ROOT}/skills/start/scripts/wait-events.sh"                # background
+   ```
+   The listener appends every PR status change to `~/.agentic-reviewer/events.jsonl`: queued, review opened,
+   findings posted, approved, merged/closed, plus PRs it skipped or triage dropped. Verdicts are read from GitHub
+   (your latest review on the PR), so they show even when a review session never reports. The wait exits with the
+   new events and the whole panel as soon as something changes; it keeps its own cursor, so relaunching it is the
+   same command.
+6. Tell the user in a few lines: what it watches (the first log line says it), that each PR opens an Orca terminal
    titled `PR <repo>#<n>` which closes itself when the PR is merged or closed, that the log is
    `~/.agentic-reviewer/logs/listener.log`, and that **closing this session stops the listener**.
+
+## When the panel wait ends
+
+This conversation is the panel of every PR the listener found and reviewed. Post its output in the user's language,
+keeping every link, as:
+
+- one line per **new** event: what happened, in plain words (review opened, findings posted and waiting for the
+  author, approved, merged, skipped and why);
+- then the **PR table**: status, PR number linked to the PR, repository, title, the review or approval link, and the
+  Slack message link (or "GitHub request" when it came from GitHub).
+
+Findings are posted as a `COMMENT` review (the review loop never uses `REQUEST_CHANGES`): call that state "findings
+posted, waiting for the author", not "changes requested". Then launch the wait again. Do not add commentary between
+events.
 
 ## When the learnings wait ends
 

@@ -12,6 +12,7 @@ Report briefly, from these sources:
 2. **Open reviews**: `terminals` in `~/.agentic-reviewer/state.json` (`owner/repo#n` → Orca terminal), plus each
    PR's state (`gh pr view <n> --repo <owner/repo> --json state,reviewDecision`).
 3. **Queue**: `queue` in the same file.
+   The PR panel (status, PR, Slack and review links) is `python3 -I "${CLAUDE_PLUGIN_ROOT}/skills/start/scripts/panel.py"`.
 4. **Recent decisions**: the last 15 lines of `~/.agentic-reviewer/logs/listener.log` (opened, skipped and why,
    triage results).
 5. **Learnings**, from the reviewer folder:

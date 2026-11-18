@@ -104,7 +104,7 @@ Highest priority first:
 
 ### Self-improvement
 
-The reviewer learns each repository from the people who work in it. When an author answers a finding with a reason that holds ("this is intended, here we read flags through `useFlag`"), in a PR thread, a PR comment or the Slack thread, the review session turns it into one short rule for that repository:
+The reviewer learns each repository from the people who work in it. When an author answers a finding on GitHub with a reason that holds ("this is intended, here we read flags through `useFlag`"), in a review thread or a PR comment, the review session turns it into one short rule for that repository:
 
 - **New rule** → proposed to you. Your reviewer session (the one that ran `/agentic-reviewer:start`) wakes up and asks you to approve, edit or reject it. Answering never pauses anything: the listener and the review sessions keep working in their own processes, and an unapproved rule is simply not used yet.
 - **A rule that comes back** → reinforced on its own (`[x1]` → `[x2]` → `[x3]`), with the PRs as sources.

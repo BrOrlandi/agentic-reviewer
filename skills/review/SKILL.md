@@ -177,8 +177,8 @@ raised as a ❓ question about the rule, not as a defect.
 The reviewer gets better at each repository by learning from what its people answer. Whenever, during the loop:
 
 - the author or another person says a finding is wrong, intended, or not how this repo does things — in a PR
-  thread, a PR comment, or a reply in the Slack thread of the `slack=` message
-  (`slackcli conversations read <channel> --thread-ts <ts> --json`), and the reason **holds** against the code; or
+  review thread or a PR comment on GitHub (Slack is not read for feedback) — and the reason **holds** against the
+  code; or
 - a finding is accepted as "their call" after the author insisted (Step 4),
 
 distill it into **one short, general rule for this repository** (≤ 200 characters, no names, no secrets), e.g.
@@ -252,7 +252,6 @@ re-check the threads, but a reaction never resolves a finding.
    - every reply in the threads this loop opened or adopted (`in_reply_to_id` = the finding's `comment_id`), plus
      PR-level comments and reviews by people after `posted_at`;
    - review comments posted since `posted_at` by bots or other people → judge them as in Step 2.4;
-   - replies in the Slack thread of the `slack=` message, if any (feedback for **Learning from feedback**);
    - CI: `gh pr checks <N> --repo <o>/<r>`.
 2. Classify each open finding:
    - **fixed** — the new code removes the problem. Verify it in the code; "Fixed in abc123" is a claim to check.

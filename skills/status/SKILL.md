@@ -1,6 +1,6 @@
 ---
 name: status
-description: Show what the agentic-reviewer is doing — whether the listener runs, the review sessions open in Orca, the queue, recent decisions and anything in the inbox. Use when the user asks for the reviewer's status or runs /agentic-reviewer:status.
+description: Show what the agentic-reviewer is doing — whether the listener runs, the review sessions open in Orca, the queue, recent decisions, pending learnings and rules close to promotion, and anything in the inbox. Use when the user asks for the reviewer's status or runs /agentic-reviewer:status.
 disable-model-invocation: true
 ---
 
@@ -14,5 +14,11 @@ Report briefly, from these sources:
 3. **Queue**: `queue` in the same file.
 4. **Recent decisions**: the last 15 lines of `~/.agentic-reviewer/logs/listener.log` (opened, skipped and why,
    triage results).
-5. **Inbox**: files in the `inbox` folder of `reviewer.yaml` (default `~/.agentic-reviewer/inbox`) — things that
+5. **Learnings**, from the reviewer folder:
+   - pending proposals: the lines of `pending-learnings.jsonl` (repo and rule) — offer `/agentic-reviewer:learnings`
+     when there are any;
+   - rules close to promotion: entries in `orgs/<owner>/<repo>.md` at `[xN]` with N ≥ `learning.promote_after` − 1;
+   - promotions in flight: `[promoted: <PR>]` entries and their PR state;
+   - files near the limit: each `orgs/<owner>/<repo>.md` over 80% of `learning.max_chars` (show size / limit).
+6. **Inbox**: files in the `inbox` folder of `reviewer.yaml` (default `~/.agentic-reviewer/inbox`) — things that
    need the user.

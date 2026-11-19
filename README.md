@@ -1,11 +1,7 @@
 # agentic-reviewer
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=p950JfvPfKk">
-    <img src="https://i.ytimg.com/vi/p950JfvPfKk/maxresdefault.jpg" alt="Watch the Agentic Reviewer explainer on YouTube (1:44)" width="720">
-  </a>
-  <br>
-  <sub>▶ <a href="https://www.youtube.com/watch?v=p950JfvPfKk">Watch the 1:44 explainer on YouTube</a></sub>
+  <img src="docs/hero.png" alt="A teammate asks for a review on Slack, you hand it straight to Claude Code" width="560">
 </p>
 
 **Become an agentic code reviewer.** Teammates ask you for a review the way they always do, by dropping a PR link in Slack. A Claude Code session picks it up, reviews the PR against the repository's own rules and your criteria, posts the comments, follows up with the author, and approves once everything is resolved. Each step shows up as a reaction on the Slack message.
@@ -13,6 +9,14 @@
 You stay the reviewer: reviews and approvals go out under your own GitHub and Slack accounts, and are marked as AI-generated. The agent does the work, while what counts as a good change comes from the repository's rules and the criteria you set.
 
 > Status: private preview. [Orca](https://orca.build) + [slackcli](https://github.com/shaharia-lab/slackcli) + [Claude Code](https://claude.com/claude-code).
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=p950JfvPfKk">
+    <img src="https://i.ytimg.com/vi/p950JfvPfKk/maxresdefault.jpg" alt="Watch the Agentic Reviewer explainer on YouTube (1:44)" width="720">
+  </a>
+  <br>
+  <sub>▶ <a href="https://www.youtube.com/watch?v=p950JfvPfKk">Watch the 1:44 explainer on YouTube</a></sub>
+</p>
 
 ## What it looks like
 

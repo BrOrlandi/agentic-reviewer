@@ -39,6 +39,11 @@ merging, pushing, requesting changes, or editing the author's code.
 Create both folders when missing. An existing state file for this PR means a resumed loop: reload it and continue
 from its `round`, `reviewed_sha` and findings instead of starting over.
 
+When the listener restarts it sends this session a note that the loop may have lost its background wait (a Mac or
+Orca restart kills it, and Orca resumes the session idle). Check your background tasks: if no wait for this PR is
+running, reload the state file and relaunch the wait of the step you were in (Step 3, CI, or Step 5b); if one is
+running, do nothing.
+
 ## Slack status reactions
 
 When the loop has a `slack=` message, keep one status reaction on it, from the user's account, with

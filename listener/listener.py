@@ -679,6 +679,106 @@ def reap() -> None:
     follow_verdicts()
 
 
+REVIEW_CMD = re.compile(r"^['\"]?/agentic-reviewer:review\s+https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)")
+RESUMED = re.compile(r"--resume['\"]?\s+['\"]?([0-9a-f]{8}-[0-9a-f-]{27})")
+LOOPS = HOME / "loops"
+RESUME_NOTE = ("The agentic-reviewer listener just restarted (the Mac, Orca or the listener went down), so this "
+               "review loop may have lost its background wait. If no wait for this PR is running in this session, "
+               "relaunch it now from the loop state file and keep following the PR as the review skill says. If one "
+               "is still running, do nothing.")
+
+
+def first_prompt(transcript: Path) -> str:
+    """The first user prompt of a Claude Code session transcript ('' when there is none in its first lines)."""
+    try:
+        with transcript.open(errors="replace") as fh:
+            for _, line in zip(range(200), fh):
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") != "user" or rec.get("isMeta"):
+                    continue
+                c = (rec.get("message") or {}).get("content")
+                text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+                text = " ".join(re.sub(r"</?command-(name|message|args)>", " ", text).split())
+                m = re.search(r"/agentic-reviewer:review\s.*", text)
+                return m[0] if m and text.startswith(("/agentic-reviewer:review", "agentic-reviewer:review")) \
+                    else text
+    except OSError:
+        pass
+    return ""
+
+
+def terminal_pr(t: dict, by_handle: dict[str, str]) -> str | None:
+    """The PR (owner/repo#n) a terminal reviews: the handle the listener saved, the /agentic-reviewer:review
+    command in its output, the transcript of the Claude session Orca resumed in it, or its tab title."""
+    if t["handle"] in by_handle:
+        return by_handle[t["handle"]]
+    out = orca("terminal", "read", "--terminal", t["handle"], "--limit", "5000", "--json")
+    try:
+        text = "\n".join(json.loads(out.stdout)["result"]["terminal"]["tail"])
+    except (ValueError, KeyError, TypeError):
+        text = ""
+    text = (t.get("preview") or "") + "\n" + text
+    # Only the launch itself counts (`claude ... '/agentic-reviewer:review <url> ...'`, or the first prompt of the
+    # resumed session), never a link that merely shows up in some other session's output.
+    m = next((REVIEW_CMD.match(w) for w in re.findall(r"'/agentic-reviewer:review [^']+'", text)), None)
+    if not m and (r := RESUMED.search(text)):
+        for f in (Path.home() / ".claude" / "projects").glob(f"*/{r[1]}.jsonl"):
+            m = REVIEW_CMD.match(first_prompt(f))
+            break
+    if m:
+        return f"{m[1]}/{m[2]}#{m[3]}".lower()
+    title = (t.get("title") or "").lower()
+    for loop in LOOPS.glob("*.json"):  # birdie-ai-application-frontend-5782.json; owner and repo may hold dashes
+        stem, _, number = loop.stem.rpartition("-")
+        for org in CFG.allowed_orgs:
+            repo = stem[len(org) + 1:] if stem.startswith(org + "-") else ""
+            if repo and re.search(rf"\bpr\b", title) and re.search(rf"\b{re.escape(repo)}\b.*\b{number}\b", title):
+                return f"{org}/{repo}#{number}"
+    return None
+
+
+def recover() -> None:
+    """On start, pick up the review sessions still open in Orca: close the ones whose PR was merged or closed while
+    the listener was down, and nudge the others to relaunch the background wait a restart may have killed."""
+    out = orca("terminal", "list", "--json")
+    try:
+        terms = json.loads(out.stdout)["result"]["terminals"]
+    except (ValueError, KeyError, TypeError):
+        log("recover: Orca unreachable, open review sessions not checked")
+        return
+    by_handle = {h: k for k, h in load_state()["terminals"].items()}
+    for t in terms:
+        if Path(t.get("worktreePath") or "/") != CFG.worktree or t.get("agentIdentity") != "claude" \
+                or not t.get("writable", True):
+            continue
+        key = terminal_pr(t, by_handle)
+        if not key:
+            continue
+        owner_repo, number = key.rsplit("#", 1)
+        state = run([which("gh"), "pr", "view", number, "--repo", owner_repo, "--json", "state", "-q", ".state"],
+                    check=False).stdout.strip()
+        if not state:
+            log(f"recover: could not read {key} on GitHub, left its terminal alone")
+            continue
+        with _lock:
+            st = load_state()
+            if state != "OPEN":
+                st["terminals"].pop(key, None)
+            else:
+                st["terminals"][key] = t["handle"]
+                st["launched"].setdefault(key, time.time())
+            save_state(st)
+        if state != "OPEN":
+            orca("terminal", "close", "--terminal", t["handle"])
+            log(f"recover: closed the review terminal of {key}: PR {state}")
+        else:
+            orca("terminal", "send", "--terminal", t["handle"], "--text", RESUME_NOTE, "--enter")
+            log(f"recover: nudged the review session of {key} to resume its loop")
+
+
 def verdict(owner_repo: str, number: str) -> tuple[str, str, str]:
     """(status, link, title) of a tracked PR as GitHub shows it: merged/closed, or your latest review on it."""
     pr = json.loads(gh("api", f"repos/{owner_repo}/pulls/{number}"))
@@ -881,6 +981,11 @@ def main() -> int:
             if time.time() - when < RELAUNCH_AFTER and f'"key": "{key}"' not in known:
                 st["tracked"].setdefault(key, {"status": ""})
         save_state(st)
+    if a.command == "run":
+        try:
+            recover()
+        except Exception as exc:  # noqa: BLE001 — never block the listener on it
+            log(f"recover failed: {exc}")
     if a.command == "once":
         catch_up(channel_ids(CFG.watch_channels))
         return 0

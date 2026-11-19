@@ -30,6 +30,8 @@ Stop at the first one missing and give the fix. uv is the exception: install it 
 
 Ask with the question tool, a few at a time, offering the detected values as defaults:
 
+0. **Language** of the PR panel — English (`en`) or Portuguese (`pt-BR`); default the language the user is writing
+   in. Review comments are not affected: they follow each PR's own language.
 1. **Allowed GitHub orgs** (required) — only their PRs open a review session. Suggest the orgs of the user's
    recent PRs (`gh search prs --author @me --limit 30 --json repository`).
 2. **Watched Slack channels** — channels where every PR link is a candidate even without a mention (the triage

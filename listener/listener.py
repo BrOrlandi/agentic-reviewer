@@ -97,6 +97,7 @@ class Config:
         self.triage_model = triage.get("model", "claude-haiku-5-5")
         self.worktree = expand(orca.get("worktree"))
         self.inbox = expand(raw.get("inbox")) or HOME / "inbox"
+        self.language = "pt-BR" if str(raw.get("language") or "en").lower().startswith("pt") else "en"
         problems = []
         if not self.allowed_orgs:
             problems.append("github.allowed_orgs is empty: nothing would ever be reviewed (fail closed)")
@@ -1016,6 +1017,9 @@ def main() -> int:
                 log(f"not a Slack message link: {link}")
         return 0
     lock = single_instance()  # noqa: F841 — held for the life of the process
+    # Settings the PR pane reads: it runs in Claude Code and cannot know where reviewer.yaml lives.
+    HOME.mkdir(parents=True, exist_ok=True)
+    (HOME / "settings.json").write_text(json.dumps({"language": CFG.language}) + "\n")
     first_run_baseline()
     with _lock:  # reviews opened before the panel existed (or by an older listener) join it
         st = load_state()

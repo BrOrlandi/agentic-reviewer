@@ -40,7 +40,7 @@ argument-hint: "[path to reviewer.yaml]"
 
 ## When the panel wait ends
 
-This conversation is the panel of every PR the listener found and reviewed. Post its output in the user's language,
+This conversation is the panel of every PR the listener found and reviewed. Post its output in the language set in `reviewer.yaml` (`language`: `en` or `pt-BR`),
 keeping every link, as:
 
 - one line per **new** event: what happened, in plain words (review opened, findings posted and waiting for the

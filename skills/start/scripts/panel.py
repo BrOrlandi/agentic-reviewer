@@ -65,9 +65,8 @@ def main() -> None:
         merged = dict(latest.get(e["key"], {}))
         if e["status"] in ("reviewing", "queued") and merged.get("status") in DONE:
             merged = {}  # a new review of a finished PR starts clean
+        merged.pop("link", None)  # the link belongs to the event that carries it (findings, approval)
         merged.update(e)
-        if e["status"] not in ("changes", "approved", "merged", "closed"):
-            merged.pop("link", None)
         latest[e["key"]] = merged
     new = [e for pos, e in events if a.since is not None and pos > a.since]
     if new:

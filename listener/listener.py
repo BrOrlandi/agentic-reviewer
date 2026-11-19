@@ -497,13 +497,17 @@ def consider(url: str, owner: str, repo: str, number: str, *, message: str, chan
         return True
     with _lock:  # reserve the PR so a live event, a catch-up and a reaction cannot all open it
         st = load_state()
+        busy = None
         if key in st["terminals"] or key in _reserved:
-            log(f"skip {url} ({origin}): a review session is already open")
-            return True
-        if not explicit and time.time() - st["launched"].get(key, 0) < RELAUNCH_AFTER:
-            log(f"skip {url} ({origin}): a review was opened in the last 24h")
-            return True
-        _reserved.add(key)
+            busy = "a review session is already open"
+        elif not explicit and time.time() - st["launched"].get(key, 0) < RELAUNCH_AFTER:
+            busy = "a review was opened in the last 24h"
+        else:
+            _reserved.add(key)
+    if busy:
+        log(f"skip {url} ({origin}): {busy}")
+        attach(key, channel, ts, origin)
+        return True
     try:
         return _consider(url, owner, repo, number, key, message=message, channel=channel, ts=ts,
                          explicit=explicit, origin=origin)
@@ -523,6 +527,8 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
     reason = skip_reason(pr)
     if reason:
         log(f"skip {url} ({origin}): {reason}")
+        if reason != "you authored it":
+            attach(key, channel, ts, origin)
         if not origin.startswith("GitHub"):
             event(key, "skipped", title=pr.get("title"), slack=slack_link(channel, ts), origin=origin, note=reason)
         return True
@@ -692,6 +698,39 @@ def verdict(owner_repo: str, number: str) -> tuple[str, str, str]:
     return "reviewing", "", pr.get("title") or ""
 
 
+def reaction(status: str, link: str) -> str | None:
+    """The slack-status.sh status that shows a verdict; a merged or closed PR shows ✅ only if you approved it."""
+    if status in ("reviewing", "changes", "approved"):
+        return status
+    return "approved" if status in FINAL and link else None
+
+
+def attach(key: str, channel: str, ts: str, origin: str) -> None:
+    """A Slack message hands over a PR that is already handled (a session open, reviewed recently, approved,
+    merged): show the PR's current status on that message too, and keep it in sync from here on."""
+    if not channel or not ts:
+        return
+    owner_repo, number = key.rsplit("#", 1)
+    try:
+        status, link, title = verdict(owner_repo, number)
+    except Exception as exc:  # noqa: BLE001 — GitHub unreachable: the message just gets no reaction
+        log(f"could not read the verdict of {key} for {channel}/{ts}: {exc}")
+        return
+    if status not in FINAL:
+        with _lock:
+            st = load_state()
+            t = st["tracked"].setdefault(key, {"status": status, "link": link, "title": title,
+                                               "slack": slack_link(channel, ts), "origin": origin})
+            msgs = t.setdefault("messages", [])
+            if [channel, ts] not in msgs:
+                msgs.append([channel, ts])
+            save_state(st)
+    shown = reaction(status, link)
+    if shown:
+        slack_status(channel, ts, shown)
+        log(f"{key}: {channel}/{ts} shows {shown} ({origin})")
+
+
 def follow_verdicts() -> None:
     """Emit a panel event whenever a tracked PR gets approved, gets findings, or is merged or closed."""
     for key, t in list(load_state()["tracked"].items()):
@@ -713,6 +752,10 @@ def follow_verdicts() -> None:
                 st["tracked"].setdefault(key, {}).update(status=status, link=link)
             save_state(st)
         log(f"panel: {key} {status} {link}".rstrip())
+        shown = reaction(status, link)
+        if shown:  # Slack messages attached after the session opened; the session reacts on its own message
+            for channel, ts in t.get("messages") or []:
+                slack_status(channel, ts, shown)
         event(key, status, title=title, link=link, slack=t.get("slack"), origin=t.get("origin"))
 
 

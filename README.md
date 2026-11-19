@@ -29,6 +29,8 @@ You stay the reviewer: reviews and approvals go out under your own GitHub and Sl
 5. Everything resolved and CI green: the agent approves, and the reaction becomes ✅.
 6. If new commits land after the approval, it reviews just the delta and re-approves when it is clean. When the PR is merged or closed, the session closes its own terminal.
 
+The same PR often arrives twice: a review request on GitHub and a link in Slack. A Slack message for a PR that is already handled (a session open, already reviewed, approved or merged) does not open a second session, but it still gets the PR's current status as a reaction and follows it from there.
+
 A message like *"merged #42, thanks!"* or *"deploy PR is up: staging → main, need an approval"* is triaged before any session opens. The first one is a notification, so nothing happens. The second gets a **release checklist** instead of a line-by-line review: only already-reviewed changes are going in, CI is green, migrations and feature flags are accounted for. Then it approves, or flags what is off.
 
 ## The flow

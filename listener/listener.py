@@ -833,8 +833,9 @@ def main() -> int:
     first_run_baseline()
     with _lock:  # reviews opened before the panel existed (or by an older listener) join it
         st = load_state()
+        known = EVENTS.read_text() if EVENTS.exists() else ""
         for key, when in st["launched"].items():
-            if time.time() - when < RELAUNCH_AFTER:
+            if time.time() - when < RELAUNCH_AFTER and f'"key": "{key}"' not in known:
                 st["tracked"].setdefault(key, {"status": ""})
         save_state(st)
     if a.command == "once":

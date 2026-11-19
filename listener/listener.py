@@ -153,6 +153,39 @@ def slack_link(channel: str, ts: str) -> str:
     return f"{base}/archives/{channel}/p{ts.replace('.', '')}"
 
 
+_names: dict[str, str] = {}
+
+
+def slack_name(user: str) -> str:
+    """Display name of a Slack user, cached for the listener's life; the ID when the lookup fails."""
+    if not user:
+        return ""
+    if user not in _names:
+        try:
+            u = json.loads(slackcli("users", "info", user, "--json", check=False, timeout=30) or "{}")
+            prof = u.get("profile") or {}
+            _names[user] = prof.get("display_name") or u.get("real_name") or prof.get("real_name") or user
+        except (ValueError, subprocess.SubprocessError, OSError):
+            return user
+    return _names[user]
+
+
+def plain(text: str) -> str:
+    """Slack markup to readable text: <url|label> -> label, <url> -> url, <@U..> -> @name."""
+    text = re.sub(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>", lambda m: "@" + slack_name(m[1]), text or "")
+    text = re.sub(r"<#C[A-Z0-9]+\|([^>]*)>", r"#\1", text)
+    text = re.sub(r"<([^>|]+)\|([^>]+)>", r"\2", text)
+    text = re.sub(r"<([^>]+)>", r"\1", text)
+    return " ".join(text.split())[:400]
+
+
+def message_fields(channel: str, ts: str, user: str = "", text: str = "") -> dict:
+    """What the panel shows about the Slack message that handed over a PR: who sent it and what it said."""
+    if not channel or not ts:
+        return {}
+    return {"channel": channel, "ts": ts, "sender": slack_name(user), "message": plain(text)}
+
+
 def event(key: str, status: str, **fields) -> None:
     """Append one status change to the events file the reviewer session turns into a panel."""
     owner_repo, number = key.rsplit("#", 1)
@@ -169,7 +202,7 @@ def track(key: str, status: str, **fields) -> None:
     with _lock:
         st = load_state()
         t = st["tracked"].setdefault(key, {})
-        t.update({k: v for k, v in fields.items() if k in ("slack", "title", "origin") and v})
+        t.update({k: v for k, v in fields.items() if k in ("slack", "title", "origin", "channel", "ts", "sender", "message") and v})
         t["status"] = status
         save_state(st)
     event(key, status, **fields)
@@ -488,7 +521,7 @@ def launch(url: str, owner: str, repo: str, number: str, mode: str, channel: str
 
 
 def consider(url: str, owner: str, repo: str, number: str, *, message: str, channel: str, ts: str,
-             explicit: bool, origin: str) -> bool:
+             explicit: bool, origin: str, user: str = "") -> bool:
     """Decide and act on one PR. Returns False when it should be retried later (GitHub unreachable)."""
     key = f"{owner}/{repo}#{number}".lower()
     if owner.lower() not in CFG.allowed_orgs:
@@ -506,11 +539,11 @@ def consider(url: str, owner: str, repo: str, number: str, *, message: str, chan
             _reserved.add(key)
     if busy:
         log(f"skip {url} ({origin}): {busy}")
-        attach(key, channel, ts, origin)
+        attach(key, channel, ts, origin, message_fields(channel, ts, user, message))
         return True
     try:
         return _consider(url, owner, repo, number, key, message=message, channel=channel, ts=ts,
-                         explicit=explicit, origin=origin)
+                         explicit=explicit, origin=origin, user=user)
     finally:
         _reserved.discard(key)
 
@@ -518,7 +551,7 @@ def consider(url: str, owner: str, repo: str, number: str, *, message: str, chan
 _reserved: set[str] = set()
 
 
-def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, origin) -> bool:
+def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, origin, user="") -> bool:
     try:
         pr = pr_info(owner, repo, number)
     except (GhFailed, subprocess.SubprocessError, OSError) as exc:
@@ -527,10 +560,12 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
     reason = skip_reason(pr)
     if reason:
         log(f"skip {url} ({origin}): {reason}")
+        msg = message_fields(channel, ts, user, message)
         if reason != "you authored it":
-            attach(key, channel, ts, origin)
+            attach(key, channel, ts, origin, msg)
         if not origin.startswith("GitHub"):
-            event(key, "skipped", title=pr.get("title"), slack=slack_link(channel, ts), origin=origin, note=reason)
+            event(key, "skipped", title=pr.get("title"), slack=slack_link(channel, ts), origin=origin, note=reason,
+                  **msg)
         return True
     kind, why = ("review_request", "triage disabled") if not CFG.triage_enabled else \
         triage(message, owner, repo, pr, explicit)
@@ -541,7 +576,8 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
             inbox(f"triage failed for {url}", f"From {origin}: {why}. To review it: `/agentic-reviewer:review {url}`")
             return True
     log(f"triage {url} ({origin}): {kind} — {why}")
-    panel = {"title": pr.get("title"), "slack": slack_link(channel, ts), "origin": origin}
+    msg = message_fields(channel, ts, user, message)
+    panel = {"title": pr.get("title"), "slack": slack_link(channel, ts), "origin": origin, **msg}
     if kind not in ("review_request", "deploy_approval"):
         event(key, "ignored", **panel, note=f"triage: {kind} — {why}")
         return True
@@ -550,7 +586,7 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
         queued = len(st["terminals"]) >= CFG.max_sessions
         if queued:
             st["queue"].append({"url": url, "owner": owner, "repo": repo, "number": number, "mode": kind,
-                                "channel": channel, "ts": ts})
+                                "channel": channel, "ts": ts, "msg": msg})
             save_state(st)
     if queued:
         log(f"queued {url}: {CFG.max_sessions} review sessions already open")
@@ -558,17 +594,18 @@ def _consider(url, owner, repo, number, key, *, message, channel, ts, explicit, 
         inbox(f"queued {url}", f"{CFG.max_sessions} review sessions are open; it starts when one closes. "
               "`/agentic-reviewer:status` lists them.")
         return True
-    open_review(url, owner, repo, number, kind, channel, ts, pr.get("title"), origin)
+    open_review(url, owner, repo, number, kind, channel, ts, pr.get("title"), origin, msg)
     return True
 
 
-def open_review(url, owner, repo, number, kind, channel, ts, title="", origin="") -> None:
+def open_review(url, owner, repo, number, kind, channel, ts, title="", origin="", msg=None) -> None:
     key = f"{owner}/{repo}#{number}".lower()
     try:
         handle = launch(url, owner, repo, number, kind, channel, ts)
     except Exception as exc:  # noqa: BLE001
         inbox(f"could not open the review of {url}", f"`{exc}`\n\nTo review it: `/agentic-reviewer:review {url}`")
-        event(key, "failed", title=title, slack=slack_link(channel, ts), origin=origin, note=str(exc)[:200])
+        event(key, "failed", title=title, slack=slack_link(channel, ts), origin=origin, note=str(exc)[:200],
+              **(msg or {}))
         return
     slack_status(channel, ts, "reviewing")
     with _lock:
@@ -579,7 +616,7 @@ def open_review(url, owner, repo, number, kind, channel, ts, title="", origin=""
         save_state(st)
     log(f"review opened: {url} ({'deploy' if kind == 'deploy_approval' else 'review'})")
     track(key, "reviewing", title=title, slack=slack_link(channel, ts), origin=origin,
-          note="deploy checklist" if kind == "deploy_approval" else "")
+          note="deploy checklist" if kind == "deploy_approval" else "", **(msg or {}))
 
 
 # --- triggers -----------------------------------------------------------------------------------
@@ -605,7 +642,8 @@ def handle_messages(msgs: list[dict], watched: set[str]) -> None:
         if not urls:
             continue
         origin = f"Slack {'DM' if msg['is_dm'] else channel} from {msg['user']}"
-        done = all(consider(*u, message=text, channel=channel, ts=ts, explicit=False, origin=origin) for u in urls)
+        done = all(consider(*u, message=text, channel=channel, ts=ts, explicit=False, origin=origin,
+                            user=msg["user"] or "") for u in urls)
         if done:
             with _lock:
                 st = load_state()
@@ -621,7 +659,8 @@ def open_message(channel: str, ts: str, origin: str) -> None:
     if not urls:
         log(f"{origin}: no PR link in {channel}/{ts}")
     for u in urls:
-        consider(*u, message=m.get("text") or "", channel=channel, ts=ts, explicit=True, origin=origin)
+        consider(*u, message=m.get("text") or "", channel=channel, ts=ts, explicit=True, origin=origin,
+                 user=m.get("user") or "")
 
 
 def poll_github() -> None:
@@ -675,7 +714,8 @@ def reap() -> None:
         start, st["queue"] = st["queue"][:max(free, 0)], st["queue"][max(free, 0):]
         save_state(st)
     for q in start:
-        open_review(q["url"], q["owner"], q["repo"], q["number"], q["mode"], q["channel"], q["ts"])
+        open_review(q["url"], q["owner"], q["repo"], q["number"], q["mode"], q["channel"], q["ts"],
+                    msg=q.get("msg"))
     follow_verdicts()
 
 
@@ -805,7 +845,7 @@ def reaction(status: str, link: str) -> str | None:
     return "approved" if status in FINAL and link else None
 
 
-def attach(key: str, channel: str, ts: str, origin: str) -> None:
+def attach(key: str, channel: str, ts: str, origin: str, msg: dict | None = None) -> None:
     """A Slack message hands over a PR that is already handled (a session open, reviewed recently, approved,
     merged): show the PR's current status on that message too, and keep it in sync from here on."""
     if not channel or not ts:
@@ -824,6 +864,8 @@ def attach(key: str, channel: str, ts: str, origin: str) -> None:
             msgs = t.setdefault("messages", [])
             if [channel, ts] not in msgs:
                 msgs.append([channel, ts])
+                if msg:  # the panel lists who else sent this PR, and what they said
+                    t.setdefault("mentions", []).append({**msg, "slack": slack_link(channel, ts), "origin": origin})
             save_state(st)
     shown = reaction(status, link)
     if shown:
@@ -856,7 +898,8 @@ def follow_verdicts() -> None:
         if shown:  # Slack messages attached after the session opened; the session reacts on its own message
             for channel, ts in t.get("messages") or []:
                 slack_status(channel, ts, shown)
-        event(key, status, title=title, link=link, slack=t.get("slack"), origin=t.get("origin"))
+        event(key, status, title=title, link=link, slack=t.get("slack"), origin=t.get("origin"),
+              **{k: t.get(k) for k in ("channel", "ts", "sender", "message")})
 
 
 def catch_up(watched: set[str]) -> None:

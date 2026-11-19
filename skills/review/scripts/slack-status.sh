@@ -23,6 +23,12 @@ for name in hourglass_flowing_sand arrows_counterclockwise white_check_mark ${tr
     [[ "$name" == "$want" ]] && continue
     slackcli messages unreact --channel-id "$channel" --timestamp "$ts" --emoji "$name" >/dev/null 2>&1 || true
 done
-slackcli messages react --channel-id "$channel" --timestamp "$ts" --emoji "$want" >/dev/null 2>&1 \
-    || echo "slack-status: could not add :$want: to $channel/$ts" >&2
+if slackcli messages react --channel-id "$channel" --timestamp "$ts" --emoji "$want" >/dev/null 2>&1; then
+    # The reviewer panel shows each message's current reaction from this log (one line per change).
+    home="${AGENTIC_REVIEWER_HOME:-$HOME/.agentic-reviewer}"
+    mkdir -p "$home" && printf '{"time":%s,"channel":"%s","ts":"%s","status":"%s","emoji":"%s"}\n' \
+        "$(date +%s)" "$channel" "$ts" "$status" "$want" >> "$home/reactions.jsonl"
+else
+    echo "slack-status: could not add :$want: to $channel/$ts" >&2
+fi
 exit 0

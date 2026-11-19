@@ -703,7 +703,7 @@ def follow_verdicts() -> None:
         except Exception as exc:  # noqa: BLE001 — GitHub unreachable: try again next time
             log(f"could not read the verdict of {key}: {exc}")
             continue
-        if status == t.get("status") and link == t.get("link"):
+        if status == t.get("status") and link == (t.get("link") or ""):
             continue
         with _lock:
             st = load_state()

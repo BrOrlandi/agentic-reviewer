@@ -1019,7 +1019,7 @@ def main() -> int:
     lock = single_instance()  # noqa: F841 — held for the life of the process
     # Settings the PR pane reads: it runs in Claude Code and cannot know where reviewer.yaml lives.
     HOME.mkdir(parents=True, exist_ok=True)
-    (HOME / "settings.json").write_text(json.dumps({"language": CFG.language}) + "\n")
+    (HOME / "settings.json").write_text(json.dumps({"language": CFG.language, "max_sessions": CFG.max_sessions}) + "\n")
     first_run_baseline()
     with _lock:  # reviews opened before the panel existed (or by an older listener) join it
         st = load_state()

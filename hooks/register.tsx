@@ -8,8 +8,8 @@ import type { Mention, PrRow, Snapshot } from '../types'
 
 const PANE = 'agentic-reviewer'
 const TITLE = 'PR reviews'
-const EMPTY: Snapshot = { active: [], done: [], queued: 0, queue: [], sessions: 0, maxSessions: 4, listener: false, updatedAt: 0, error: '', language: 'en' }
-const snapshot = atom({ plugin: 'agentic-reviewer', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-1' })
+const EMPTY: Snapshot = { active: [], done: [], queued: 0, queue: [], sessions: 0, maxSessions: 4, held: [], hold: { approvedAfter: 30, changesAfter: 60, checkEvery: 30 }, listener: false, updatedAt: 0, error: '', language: 'en' }
+const snapshot = atom({ plugin: 'agentic-reviewer', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-2' })
 
 const ACTIVE = ['queued', 'reviewing', 'changes', 'approved']
 const FINISHED = ['merged', 'closed', 'ignored', 'skipped', 'failed']
@@ -20,7 +20,7 @@ const TEXT = {
     status: {
       queued: '⏸ queued', reviewing: '⏳ reviewing', changes: '🔄 waiting for the author', approved: '✅ approved',
       merged: '🟣 merged', closed: '⚫ closed', ignored: '⏭ not a review request', skipped: '⏭ skipped',
-      failed: '❌ could not open',
+      failed: '❌ could not open', held: '💤 on hold',
     } as Record<string, string>,
     group: 'group chat',
     findings: (done: number, all: number) => `${done}/${all} findings resolved`,
@@ -48,7 +48,12 @@ const TEXT = {
     pending: '⏳ Pending (approved or changes requested)',
     nonePending: 'Nothing pending.',
     queueTitle: '⏸ Queue (next to start)',
-    queueHint: 'Each starts when a session closes: its PR merged or closed.',
+    queueHint: 'Each starts when a session closes: its PR merged or closed, or a quiet one put on hold.',
+    holdTitle: '💤 On hold (quiet, session closed)',
+    holdHint: (a: number, c: number, e: number) =>
+      `Closed to make room for the queue: approved and quiet for ${a}min+, or waiting for the author for ${c}min+. Checked every ${e}min with plain GitHub calls (no tokens); any news sends it back to the front of the queue.`,
+    heldFor: (t: string) => `on hold for ${t}`,
+    nextCheck: (t: string) => `next check in ${t}`,
     sessions: (n: number, max: number) => ` · ${n}/${max} sessions`,
     position: (n: number) => (n === 1 ? 'next' : `#${n}`),
     done: '✔ Done in the last 24h',
@@ -58,7 +63,7 @@ const TEXT = {
     status: {
       queued: '⏸ na fila', reviewing: '⏳ revisando', changes: '🔄 aguardando o autor', approved: '✅ aprovada',
       merged: '🟣 mergeada', closed: '⚫ fechada', ignored: '⏭ não era pedido de review', skipped: '⏭ pulada',
-      failed: '❌ não abriu',
+      failed: '❌ não abriu', held: '💤 em espera',
     } as Record<string, string>,
     group: 'grupo',
     findings: (done: number, all: number) => `${done}/${all} findings resolvidos`,
@@ -86,7 +91,12 @@ const TEXT = {
     pending: '⏳ Pendentes (aprovadas ou com revisão solicitada)',
     nonePending: 'Nada pendente.',
     queueTitle: '⏸ Fila (próximas a entrar)',
-    queueHint: 'Cada uma entra quando uma sessão fecha: PR mergeada ou fechada.',
+    queueHint: 'Cada uma entra quando uma sessão fecha: PR mergeada ou fechada, ou uma parada posta em espera.',
+    holdTitle: '💤 Em espera (paradas, sessão fechada)',
+    holdHint: (a: number, c: number, e: number) =>
+      `Fechadas para abrir vaga para a fila: aprovadas e paradas há ${a}min+, ou aguardando o autor há ${c}min+. Checadas a cada ${e}min só com chamadas ao GitHub (sem tokens); qualquer novidade devolve a PR para o começo da fila.`,
+    heldFor: (t: string) => `em espera há ${t}`,
+    nextCheck: (t: string) => `próxima checagem em ${t}`,
     sessions: (n: number, max: number) => ` · ${n}/${max} sessões`,
     position: (n: number) => (n === 1 ? 'próxima' : `#${n}`),
     done: '✔ Concluídas nas últimas 24h',
@@ -363,7 +373,15 @@ async function collect($: any): Promise<Snapshot> {
     .slice(0, 15)
   const queue: string[] = ((state?.queue ?? []) as Json[]).map(q => `${q.owner}/${q.repo}#${q.number}`.toLowerCase())
   const maxSessions = Number(settings?.max_sessions ?? 4)
-  return { active, done, queued: queue.length, queue, sessions: Object.keys(handles).length, maxSessions, listener, updatedAt: now, error: '', language }
+  const h: Json = settings?.hold ?? {}
+  const hold = {
+    approvedAfter: Number(h.approved_after ?? 30), changesAfter: Number(h.changes_after ?? 60),
+    checkEvery: Number(h.check_every ?? 30),
+  }
+  const held = Object.entries((state?.held ?? {}) as Json).map(([key, v]: [string, Json]) => ({
+    key, since: Number(v.since ?? 0) * 1000, checked: Number(v.checked ?? 0) * 1000, reason: String(v.reason ?? ''),
+  }))
+  return { active, done, queued: queue.length, queue, sessions: Object.keys(handles).length, maxSessions, held, hold, listener, updatedAt: now, error: '', language }
 }
 
 async function tick($: any) {
@@ -442,7 +460,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    const card = (r: PrRow, isActive: boolean, position = '') => (
+    const card = (r: PrRow, isActive: boolean, position = '', holdLine = '') => (
       <Box
         flexDirection="column"
         borderStyle="round"
@@ -478,6 +496,11 @@ export const register: Register = on => {
             </Box>
           ))}
         </Box>
+        {holdLine ? (
+          <Box marginTop={1}>
+            <Text color="blue">💤 {holdLine}</Text>
+          </Box>
+        ) : null}
         {isActive && r.agent ? (
           <Box marginTop={1}>
             <Text color={r.agentState === 'working' ? 'green' : r.agentState === 'gone' ? 'red' : 'yellow'}>
@@ -523,7 +546,18 @@ export const register: Register = on => {
       return i < 0 ? order.length : i
     }
     const queuedRows = snap.active.filter(r => r.status === 'queued').sort((a, b) => rank(a) - rank(b))
-    const pending = snap.active.filter(r => r.status === 'changes' || r.status === 'approved')
+    const heldOf = Object.fromEntries((snap.held ?? []).map(x => [x.key, x]))
+    const pending = snap.active.filter(r => (r.status === 'changes' || r.status === 'approved') && !heldOf[r.key])
+    const holdRows = snap.active
+      .filter(r => (r.status === 'changes' || r.status === 'approved') && heldOf[r.key])
+      .sort((a, b) => (heldOf[a.key]?.since ?? 0) - (heldOf[b.key]?.since ?? 0))
+    const hc = snap.hold ?? EMPTY.hold
+    const nextCheck = (key: string) => {
+      const x = heldOf[key]
+      if (!x) return ''
+      const due = x.checked + hc.checkEvery * 60000 - (snap.updatedAt || 0)
+      return `${L.heldFor(ago((snap.updatedAt || 0) - x.since))} · ${L.nextCheck(ago(Math.max(due, 0)))}`
+    }
 
     return (
       <Box flexDirection="column">
@@ -543,6 +577,16 @@ export const register: Register = on => {
             </Box>
             <Text dimColor>{L.queueHint}</Text>
             {queuedRows.map((r, i) => card(r, true, L.position(i + 1)))}
+          </Box>
+        ) : null}
+        {holdRows.length ? (
+          <Box flexDirection="column">
+            <Box marginTop={1}>
+              <Text bold>{L.holdTitle} ({holdRows.length}) </Text>
+              <Text dimColor>{rule('─', width - L.holdTitle.length - 6)}</Text>
+            </Box>
+            <Text dimColor>{L.holdHint(hc.approvedAfter, hc.changesAfter, hc.checkEvery)}</Text>
+            {holdRows.map(r => card(r, true, '', nextCheck(r.key)))}
           </Box>
         ) : null}
         {section(L.done, snap.done, L.noneDone, false)}

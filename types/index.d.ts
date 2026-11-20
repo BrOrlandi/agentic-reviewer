@@ -29,6 +29,8 @@ export type Snapshot = {
   queue: string[]
   sessions: number
   maxSessions: number
+  held: { key: string; since: number; checked: number; reason: string }[]
+  hold: { approvedAfter: number; changesAfter: number; checkEvery: number }
   listener: boolean
   updatedAt: number
   error: string

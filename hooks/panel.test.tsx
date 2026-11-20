@@ -15,11 +15,14 @@ const FILES: Record<string, string> = {
       status: 'queued', title: 'feat: later', sender: 'Duda', message: 'depois' },
     { time: '2026-11-19T19:50:00-03:00', key: 'acme/app#8', repo: 'acme/app', number: 8, url: 'https://github.com/acme/app/pull/8',
       status: 'queued', title: 'feat: first', sender: 'Eva', message: 'primeiro' },
+    { time: '2026-11-19T17:00:00-03:00', key: 'acme/web#5', repo: 'acme/web', number: 5, url: 'https://github.com/acme/web/pull/5',
+      status: 'approved', title: 'chore: quiet', sender: 'Fabi', message: 'sem pressa' },
   ].map(e => JSON.stringify(e)).join('\n') + '\n',
   [`${H}/reactions.jsonl`]: '{"time":1,"channel":"C1","ts":"1.1","status":"changes","emoji":"arrows_counterclockwise"}\n',
   [`${H}/state.json`]: JSON.stringify({
-    tracked: { 'acme/app#7': { status: 'changes', mentions: [{ channel: 'C2', ts: '2.2', sender: 'Caio', message: 'essa também', slack: 'https://s/2' }] } },
+    tracked: { 'acme/web#5': { status: 'approved' }, 'acme/app#7': { status: 'changes', mentions: [{ channel: 'C2', ts: '2.2', sender: 'Caio', message: 'essa também', slack: 'https://s/2' }] } },
     terminals: { 'acme/app#7': 'term_1' },
+    held: { 'acme/web#5': { since: (NOW - 40 * 60000) / 1000, checked: (NOW - 10 * 60000) / 1000, reason: 'approved, no activity' } },
     queue: [{ owner: 'acme', repo: 'app', number: '8' }, { owner: 'acme', repo: 'app', number: '9' }],
   }),
   [`${H}/listener.lock`]: '123',
@@ -68,6 +71,8 @@ test('the pane shows the sender, the message, the reaction and the agent', async
   expect((await ui.find({ type: 'Text', text: /PR atualizada há 30min/ }))).toBeTruthy()
   expect((await ui.find({ type: 'Text', text: /Beto/ }))).toBeTruthy()
   expect((await ui.find({ type: 'Text', text: /Fila/ }))?.text).toContain('(2)')
+  expect((await ui.find({ type: 'Text', text: /Em espera/ }))?.text).toContain('(1)')
+  expect((await ui.find({ type: 'Text', text: /em espera há 40min · próxima checagem em 20min/ }))).toBeTruthy()
   expect((await ui.find({ type: 'Text', text: /1\/6 sessões/ }))).toBeTruthy()
   const all = await ui.findAll({ type: 'Text' })
   const at = (re: RegExp) => all.findIndex(t => re.test(t.text ?? ''))

@@ -93,6 +93,12 @@ class Config:
         self.max_rounds = int(review.get("max_rounds", 5))
         self.max_sessions = int(review.get("max_sessions", 4))
         self.skip_permissions = bool(review.get("skip_permissions", True))
+        hold = review.get("hold") or {}
+        # Minutes without activity before an approved / changes-requested PR gives its session back (0 = never),
+        # and how often a PR on hold is checked for news, by plain GitHub calls (no tokens).
+        self.hold_approved = int(hold.get("approved_after", 30))
+        self.hold_changes = int(hold.get("changes_after", 60))
+        self.hold_check = max(5, int(hold.get("check_every", 30)))
         self.triage_enabled = bool(triage.get("enabled", True))
         self.triage_model = triage.get("model", "claude-haiku-5-5")
         self.worktree = expand(orca.get("worktree"))
@@ -222,6 +228,7 @@ def load_state() -> dict:
     st.setdefault("terminals", {})       # "owner/repo#n" -> Orca terminal handle
     st.setdefault("queue", [])           # reviews waiting for a free session slot
     st.setdefault("tracked", {})         # "owner/repo#n" -> last status shown on the panel, until merged/closed
+    st.setdefault("held", {})            # "owner/repo#n" -> a quiet PR whose session was closed to free its slot
     return st
 
 
@@ -612,6 +619,7 @@ def open_review(url, owner, repo, number, kind, channel, ts, title="", origin=""
     with _lock:
         st = load_state()
         st["launched"][key] = time.time()
+        st["held"].pop(key, None)
         if handle:
             st["terminals"][key] = handle
         save_state(st)
@@ -686,13 +694,102 @@ def poll_github() -> None:
             save_state(st)
 
 
+def hold_reason(key: str, st: dict, pr: dict, term: dict | None) -> tuple[str, float]:
+    """Why an open review session may give its slot back to the queue ('' to keep it), and how long its PR has been
+    quiet: the PR is approved or waiting for the author and nothing happened on it, the agent's own comments
+    included, for longer than the hold limit. (The terminal's output is no signal: a waiting session repaints its
+    background task's timer.)"""
+    status = (st["tracked"].get(key) or {}).get("status")
+    limit = {"approved": CFG.hold_approved, "changes": CFG.hold_changes}.get(status or "", 0)
+    if not limit or not pr.get("updatedAt"):
+        return "", 0
+    quiet = time.time() - datetime.fromisoformat(pr["updatedAt"].replace("Z", "+00:00")).timestamp()
+    if quiet < limit * 60:
+        return "", 0
+    if term is None:
+        return "", 0  # Orca unreachable: do not touch the session
+    owner_repo, number = key.rsplit("#", 1)
+    owner, repo = owner_repo.split("/", 1)
+    try:
+        loop = json.loads((LOOPS / f"{owner}-{repo}-{number}.json").read_text())
+    except (OSError, ValueError):
+        loop = {}
+    if loop.get("ci_comment_id") and loop.get("approved_sha") != pr.get("headRefOid"):
+        return "", 0  # the review is done and waits for CI to approve: keep that wait
+    return f"{status}, no activity for {int(quiet // 60)}min (limit {limit}min)", quiet
+
+
+def news_since(owner_repo: str, number: str, held: dict) -> str:
+    """What happened on a held PR since it went on hold, by plain GitHub calls: '' for nothing, 'merged'/'closed',
+    or the kinds of activity (push, comment, rerequest)."""
+    pr = json.loads(gh("pr", "view", number, "--repo", owner_repo, "--json", "state,headRefOid,reviewRequests"))
+    if pr.get("state") != "OPEN":
+        return (pr.get("state") or "closed").lower()
+    since = datetime.fromtimestamp(held["since"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    me = ME["gh"].lower()
+    human = f'select((.user.login|ascii_downcase) != "{me}" and .user.type != "Bot")'
+    kinds = []
+    if held.get("head") and pr.get("headRefOid") != held["head"]:
+        kinds.append("push")
+    count = 0
+    for path, field in ((f"pulls/{number}/comments", "created_at"), (f"issues/{number}/comments", "created_at"),
+                        (f"pulls/{number}/reviews", "submitted_at")):
+        out = gh("api", "--paginate", f"repos/{owner_repo}/{path}",
+                 "--jq", f'[.[] | {human} | select(.{field} > "{since}")] | length')
+        count += sum(int(x) for x in out.split() if x.isdigit())
+    if count:
+        kinds.append("comment")
+    if any((r.get("login") or "").lower() == me for r in pr.get("reviewRequests") or []):
+        kinds.append("rerequest")
+    return ",".join(kinds)
+
+
+def check_held(st: dict) -> list[dict]:
+    """Check the PRs on hold that are due; the ones with news go back to the front of the queue."""
+    back = []
+    for key, h in list(st["held"].items()):
+        if time.time() - h.get("checked", 0) < CFG.hold_check * 60:
+            continue
+        h["checked"] = time.time()
+        owner_repo, number = key.rsplit("#", 1)
+        try:
+            news = news_since(owner_repo, number, h)
+        except Exception as exc:  # noqa: BLE001 — GitHub unreachable: check again next time
+            log(f"could not check {key} on hold: {exc}")
+            continue
+        if news in ("merged", "closed"):
+            del st["held"][key]
+            log(f"{key} left hold: PR {news}")
+            continue
+        if not news:
+            continue
+        del st["held"][key]
+        owner, repo = owner_repo.split("/", 1)
+        t = st["tracked"].get(key) or {}
+        try:
+            mode = json.loads((LOOPS / f"{owner}-{repo}-{number}.json").read_text()).get("mode", "")
+        except (OSError, ValueError):
+            mode = ""
+        back.append({"url": f"https://github.com/{owner_repo}/pull/{number}", "owner": owner, "repo": repo,
+                     "number": number, "mode": "deploy_approval" if mode == "deploy" else "review_request",
+                     "channel": t.get("channel", ""), "ts": t.get("ts", ""),
+                     "msg": {k: t[k] for k in ("channel", "ts", "sender", "message") if t.get(k)}})
+        t["status"] = "queued"  # shown as queued until a slot opens; follow_verdicts leaves queued PRs alone
+        log(f"{key} has news while on hold ({news}): back to the front of the queue")
+        event(key, "queued", title=t.get("title"), slack=t.get("slack"), origin=t.get("origin"),
+              note=f"news while on hold: {news}", **{k: t.get(k) for k in ("channel", "ts", "sender", "message")})
+    return back
+
+
 def reap() -> None:
     """Close the terminals of PRs that left OPEN, then start queued reviews in the freed slots."""
     out = orca("terminal", "list", "--json")
     try:
-        alive = {t["handle"] for t in json.loads(out.stdout)["result"]["terminals"]}
+        terms = {t["handle"]: t for t in json.loads(out.stdout)["result"]["terminals"]}
+        alive = set(terms)
     except (ValueError, KeyError, TypeError):
-        alive = None  # Orca unreachable: do not guess
+        terms, alive = {}, None  # Orca unreachable: do not guess
+    candidates = []
     with _lock:
         st = load_state()
         for key, handle in list(st["terminals"].items()):
@@ -705,12 +802,32 @@ def reap() -> None:
                 log(f"freed the slot of {key}: open for over {SLOT_MAX_AGE // 3600}h (loop timed out or handed back)")
                 continue
             owner_repo, number = key.rsplit("#", 1)
-            state = run([which("gh"), "pr", "view", number, "--repo", owner_repo, "--json", "state", "-q", ".state"],
-                        check=False).stdout.strip()
+            try:
+                pr = json.loads(run([which("gh"), "pr", "view", number, "--repo", owner_repo, "--json",
+                                     "state,updatedAt,headRefOid"], check=False).stdout or "{}")
+            except ValueError:
+                pr = {}
+            state = pr.get("state") or ""
             if state and state != "OPEN":
                 orca("terminal", "close", "--terminal", handle)
                 del st["terminals"][key]
                 log(f"closed the review terminal of {key}: PR {state}")
+                continue
+            why, quiet = hold_reason(key, st, pr, terms.get(handle)) if state else ("", 0)
+            if why:
+                candidates.append((quiet, key, handle, why, pr))
+        st["queue"] = check_held(st) + st["queue"]
+        # Hold only to make room: as many quiet sessions as the queue needs, the longest-quiet first.
+        need = len(st["queue"]) - (CFG.max_sessions - len(st["terminals"]))
+        for _, key, handle, why, pr in sorted(candidates, reverse=True)[:max(need, 0)]:
+            orca("terminal", "close", "--terminal", handle)
+            del st["terminals"][key]
+            t = st["tracked"].get(key) or {}
+            st["held"][key] = {"since": time.time(), "checked": time.time(), "head": pr.get("headRefOid"),
+                               "status": t.get("status"), "reason": why}
+            log(f"put {key} on hold to free a slot for the queue: {why}")
+            event(key, "held", title=t.get("title"), slack=t.get("slack"), origin=t.get("origin"), note=why,
+                  **{k: t.get(k) for k in ("channel", "ts", "sender", "message")})
         free = CFG.max_sessions - len(st["terminals"])
         start, st["queue"] = st["queue"][:max(free, 0)], st["queue"][max(free, 0):]
         save_state(st)
@@ -1019,7 +1136,8 @@ def main() -> int:
     lock = single_instance()  # noqa: F841 — held for the life of the process
     # Settings the PR pane reads: it runs in Claude Code and cannot know where reviewer.yaml lives.
     HOME.mkdir(parents=True, exist_ok=True)
-    (HOME / "settings.json").write_text(json.dumps({"language": CFG.language, "max_sessions": CFG.max_sessions}) + "\n")
+    (HOME / "settings.json").write_text(json.dumps({"language": CFG.language, "max_sessions": CFG.max_sessions, "hold": {
+        "approved_after": CFG.hold_approved, "changes_after": CFG.hold_changes, "check_every": CFG.hold_check}}) + "\n")
     first_run_baseline()
     with _lock:  # reviews opened before the panel existed (or by an older listener) join it
         st = load_state()

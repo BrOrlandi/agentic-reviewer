@@ -15,6 +15,10 @@ review:
   max_rounds: 5
   max_sessions: 4                 # review sessions open at once; the rest wait in a queue
   skip_permissions: true          # review sessions run without permission prompts (see Safety in the README)
+  hold:                           # with every session busy and PRs in the queue, quiet ones give their slot back
+    approved_after: 30            # minutes an approved PR may sit with no activity (0 = never hold)
+    changes_after: 60             # minutes a PR waiting for the author may sit with no activity (0 = never hold)
+    check_every: 30               # minutes between checks of a held PR for news (plain GitHub calls, no tokens)
 triage:
   enabled: true
   model: claude-haiku-5-5

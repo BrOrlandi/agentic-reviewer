@@ -2,7 +2,10 @@
   "name": "agentic-reviewer",
   "version": "0.1.0",
   "description": "Become an agentic code reviewer: PR links sent to you on Slack open a Claude Code review that follows up with the author and approves when everything is resolved.",
-  "author": { "name": "Bruno Orlandi" },
+  "author": {
+    "name": "Bruno Orlandi"
+  },
   "license": "MIT",
-  "repository": "https://github.com/BrOrlandi/agentic-reviewer"
+  "repository": "https://github.com/BrOrlandi/agentic-reviewer",
+  "types": "./types/index.d.ts"
 }

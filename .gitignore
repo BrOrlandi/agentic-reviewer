@@ -5,3 +5,6 @@ orgs/
 pending-learnings.jsonl
 .DS_Store
 __pycache__/
+
+# Written by Claude Code for the editor
+.claude-plugin/types/

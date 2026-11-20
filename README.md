@@ -35,6 +35,14 @@ The same PR often arrives twice: a review request on GitHub and a link in Slack.
 
 A message like *"merged #42, thanks!"* or *"deploy PR is up: staging → main, need an approval"* is triaged before any session opens. The first one is a notification, so nothing happens. The second gets a **release checklist** instead of a line-by-line review: only already-reviewed changes are going in, CI is green, migrations and feature flags are accounted for. Then it approves, or flags what is off.
 
+### The PR panel
+
+The plugin ships a Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/overview): a pane beside the chat that opens with `/agentic-reviewer:start` (or any time with `/reviewer-panel`) and refreshes every 10 seconds. It splits the PRs into what is being reviewed now, what is pending (approved, or waiting for the author), the queue of reviews waiting for a free session, and what was finished in the last 24 hours. Each card shows who sent the PR on Slack, their message and where they sent it, anyone else who sent the same PR, what the review agent is doing (working or waiting, the round, how many findings are resolved), when the PR last changed on GitHub, and links to the review, the Slack message and the PR. The pane follows `language` in `reviewer.yaml` (English or Portuguese).
+
+<p align="center">
+  <img src="docs/panel.png" alt="The PR panel: one review running, two pending, one in the queue and one merged, each with the Slack sender and message" width="460">
+</p>
+
 ## The flow
 
 ```mermaid
@@ -87,6 +95,7 @@ You open Claude Code in your reviewer folder (where `reviewer.yaml` and `CRITERI
 | **Listener** (`listener/`) | A background process of your Claude Code session, started by `/agentic-reviewer:start`. It runs while that session is open and stops with it. It listens to Slack in real time over the websocket of your own browser session (read from `slackcli`'s keychain entry), catches up with Slack search after every reconnect and every 10 minutes, filters by trigger and org, runs the semantic triage, and opens one Orca terminal per PR, up to `max_sessions` at once (the rest wait in a queue). It closes the terminal when the PR leaves `OPEN`. State and logs live in `~/.agentic-reviewer/`. |
 | **Triage** | A cheap model (`claude -p` on Haiku) reads the message, the PR's metadata (title, base and head branches, state, labels, files) and the repository's flow (`REVIEW.md`, `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING`, release docs), and answers `review_request`, `deploy_approval`, `notification` or `other`. Only the first two open a session. |
 | **`/agentic-reviewer:review`** | The review loop, one session per PR: rules first and taste last, findings verified in the code, one review per round, never `REQUEST_CHANGES`, never merges. It waits for the author in the background, re-reviews, approves, keeps the approval honest on new commits, and drives the Slack reactions. With `mode=deploy` it runs the release checklist instead. |
+| **PR panel** (`hooks/`) | The mod behind the pane above. It only reads what the listener and the review sessions already write in `~/.agentic-reviewer/`, plus `orca terminal list`, `gh` for each open PR's last update, and `slackcli` for channel names. It polls only in a session where the pane was opened, so review sessions cost nothing. |
 | **`learnings`** | Goes through the rules review sessions proposed, promotes the ones that keep coming back into the repository (as a PR), and keeps each learnings file under its limit. |
 | **`setup` · `start` · `stop` · `status` · `open`** | `/agentic-reviewer:setup` interviews you once, writes `reviewer.yaml` and `CRITERIA.md`, and checks `slackcli`, `gh`, Orca and `uv`. `start` launches the listener in the background of the current session and turns that conversation into a live panel of every PR it found and reviewed (status, who sent it on Slack and what they wrote, the message's current reaction, PR and Slack links, approval or findings link); `stop` ends it; `status` shows open reviews, the queue, recent decisions and the inbox; `open <slack link>` reviews a message the listener did not pick up. |
 
